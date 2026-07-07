@@ -1,0 +1,2 @@
+# 全部为可选。核心只用 Python 3.10+ 标准库。
+certifi   # 可选: 避免 macOS SSL 证书问题, 没装也能跑(有 fallback)
