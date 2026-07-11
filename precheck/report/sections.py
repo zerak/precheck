@@ -139,6 +139,46 @@ def print_funding(ctx):
     print()
 
 
+def _print_reversion_evidence(ctx):
+    """反转预警下, 打印"反向回撤到 EMA 的历史概率依据"(查 reversion 缓存)。"""
+    ev = ctx.reversion
+    if not ev:
+        return
+    status = ev.get("status")
+    if status == "missing":
+        print("   ℹ 反向回撤依据: 无缓存 → 加 --fr / --force-reversion 现算 (需拉历史约几十秒)")
+        return
+    if status == "stale":
+        print(f"   ℹ 反向回撤依据: 缓存已过期 (生成于 {ev.get('generated_at')}) "
+              f"→ 加 --fr 刷新")
+        return
+    if status in ("nodata", "skip"):
+        return
+    # status == ok
+    side_zh = "回调" if ev["side"] == "up" else "反弹"
+    move_zh = "跌回" if ev["side"] == "up" else "涨回"
+    cur = ctx.current
+    print(f"   ─ 反向回撤依据 (历史统计, 缓存 {ev.get('generated_at')}):")
+    if cur:
+        print(f"     现价 {fmt_price(cur)}")
+    for period, dev_atr, by_window, ref, diff, pct in ev["rows"]:
+        parts = []
+        for W in sorted(by_window):
+            st = by_window[W]
+            parts.append(f"未来{W}根触及{st['reach']*100:.0f}% (缺口中位{st['cov50']*100:.0f}%)")
+        tgt = f"目标 EMA{period}={fmt_price(ref)}" if ref is not None else f"EMA{period}"
+        if diff is not None and pct is not None:
+            gap = f" (距现价 {fmt_price(abs(diff))} / {abs(pct):.1f}%)"
+        elif pct is not None:
+            gap = f" (距现价 {abs(pct):.1f}%)"
+        else:
+            gap = ""
+        print(f"     {tgt}{gap}, 偏离 {dev_atr:.1f}×ATR → {move_zh}概率: "
+              + " / ".join(parts))
+    print(f"     读法: 触及%=历史上同偏离度{side_zh}到该EMA的占比; "
+          f"缺口中位=没到位时通常{side_zh}到缺口的几成 (可作分批止盈参考)")
+
+
 def print_summary(ctx):
     vol = ctx.vol
     oi_meaning = ctx.oi_meaning
@@ -185,14 +225,13 @@ def print_summary(ctx):
         bias_zh = "多" if a["bias"] == "long" else "空"
         print(f" → 结论: 趋势偏{bias_zh}, 但高位满足反转条件 → 不追{bias_zh}, 警惕反转. "
               f"若确认见{'顶' if a['bias']=='long' else '底'}可考虑{rev_zh}")
+        _print_reversion_evidence(ctx)
     else:
         print()
         for line in a["narrative"]:
             print(f" → {line}")
 
     print()
-    print(" 提醒: 本工具只提供四维数据快照,不替代交易决策。")
-    print(" 入场前还需独立确认: 入场点 / 止损位 / 仓位规模 (含手续费 0.08%)。")
     print("=" * 78)
 
 
@@ -613,8 +652,9 @@ def print_suggestions(ctx):
         print()
 
     print("=" * 78)
-    print(" 提醒: 自动方案基于客观数据, 不替代你对 K 线形态的眼睛确认")
-    print(" 如要修改账户/风险:  --account <数字> --risk <数字>")
-    print(" 如要交互验证你自己的方案:  加 --check")
+    print(" 提醒: 本工具只提供四维数据快照 + 自动方案, 不替代交易决策与你对 K 线形态的眼睛确认。")
+    print("       入场前还需独立确认: 入场点 / 止损位 / 仓位规模 (含手续费 0.08%)。")
+    print(" 如要修改账户/风险:  --account <数字> / -a   --risk <数字> / -r")
+    print(" 如要交互验证你自己的方案:  加 --check / -c")
     print("=" * 78)
 

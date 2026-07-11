@@ -20,11 +20,12 @@ from .checklist import run_checklist
 
 
 def run(inst_id, exchange="okx", with_check=False, account=10000, risk_pct=1,
-        level=DEFAULT_LEVEL):
+        level=DEFAULT_LEVEL, force_reversion=False):
     ctx = MarketContext(
         inst_id=inst_id, exchange=exchange, level=level,
         account=account, risk_pct=risk_pct, with_check=with_check,
     )
+    ctx.force_reversion = force_reversion
     print_header(ctx)
 
     rows = []
@@ -115,6 +116,14 @@ def run(inst_id, exchange="okx", with_check=False, account=10000, risk_pct=1,
     ctx.momentum = detect_momentum_exhaustion(klines_1h) if klines_1h else None
     ctx.ema_dev = compute_ema_deviation(row_1h)
     ctx.assessment = assess_bias_timing(ctx)
+
+    # 反转预警时: 查 reversion 缓存, 给出"反向回撤到 EMA 的概率依据"
+    if ctx.assessment and ctx.assessment.get("reversal_triggered") and exchange == "binance":
+        from .backtest.reversion import reversion_evidence
+        ctx.reversion = reversion_evidence(
+            inst_id, ctx.ema_dev, ctx.assessment["bias"],
+            exchange=exchange, force=ctx.force_reversion,
+        )
 
     print_summary(ctx)
 

@@ -41,3 +41,7 @@ class MarketContext:
 
     # ── 判定结果 ──
     assessment: dict = None
+
+    # ── 反转预警的反向回撤依据 (查缓存 reversion 得到) ──
+    force_reversion: bool = False
+    reversion: dict = None

@@ -4,13 +4,22 @@
 
 数据来源: 默认 Binance USDⓈ-M Futures；可用 --okx 切到 OKX 公开 REST API (无需认证)
 
-用法:
+用法 (所有参数支持缩写):
   python -m precheck <SYMBOL>                       # 默认 Binance + 日内级别: 诊断 + 自动方案
-  python -m precheck <SYMBOL> --okx                 # 指定 OKX 数据源
-  python -m precheck <SYMBOL> --exchange okx        # 同上,完整写法
-  python -m precheck <SYMBOL> --account 2000 --risk 2  # 自定义账户/风险
+  python -m precheck <SYMBOL> --okx / -o            # 指定 OKX 数据源 (--binance / -b 切回)
+  python -m precheck <SYMBOL> --exchange okx / -e   # 同上,完整写法
+  python -m precheck <SYMBOL> --account 2000 / -a   # 自定义账户
+  python -m precheck <SYMBOL> --risk 2 / -r         # 自定义风险%
   python -m precheck <SYMBOL> -l 1                  # 交易级别 (见下), --level 或 -l, 也可 -l swing
-  python -m precheck <SYMBOL> --check               # 交互式 5 项 checklist (验证你自己的方案)
+  python -m precheck <SYMBOL> --check / -c          # 交互式 5 项 checklist (验证你自己的方案)
+  python -m precheck <SYMBOL> --fr                  # 反转预警时, 强制现算反向回撤依据(拉历史约几十秒)
+                                                    #   --fr / --force-reversion; 否则只读缓存, 缓存缺失/过期仅提示
+
+反向回撤依据 (仅 Binance, 触发反转预警时输出):
+  查缓存 data/market_cache/reversion/<SYMBOL>_binance.json, 给出"价格历史上从当前偏离度
+  回调/反弹到 EMA50/EMA200 的概率 + 缺口幅度"。缓存由 precheck.backtest.reversion 生成:
+    python -m precheck.backtest.reversion <SYMBOL>   # 预生成/刷新某标的的分布缓存
+  precheck 只读缓存(毫秒级); 缓存不存在或超 24h 时, 不自动重算, 仅提示加 --fr。
 
 交易级别 --level / -l (决定关键位/止盈用哪些周期、多远还算数; 持仓时间随数字递增):
   0 / intraday / 日内   持仓几小时~1天   关键位周期 1h+4h    距离按 4h ATR × 6    (默认)
@@ -43,13 +52,15 @@ from .data.symbols import normalize_symbol
 from .engine import run
 
 
-def _extract_flag_value(args, name, default):
-    """从 args 中拿 --name VALUE,返回 (value, remaining_args)。"""
+def _extract_flag_value(args, names, default):
+    """从 args 中拿 (--name|别名) VALUE,返回 (value, remaining_args)。names 可为 str 或 序列。"""
+    if isinstance(names, str):
+        names = (names,)
     out = []
     value = default
     i = 0
     while i < len(args):
-        if args[i] == name and i + 1 < len(args):
+        if args[i] in names and i + 1 < len(args):
             try:
                 value = float(args[i + 1])
             except ValueError:
@@ -61,18 +72,24 @@ def _extract_flag_value(args, name, default):
     return value, out
 
 
+def _extract_bool(args, names):
+    """从 args 中剔除任意开关别名, 返回 (present, remaining_args)。"""
+    present = any(a in names for a in args)
+    return present, [a for a in args if a not in names]
+
+
 def _extract_exchange(args):
     out = []
     exchange = "binance"
     i = 0
     while i < len(args):
-        if args[i] == "--binance":
+        if args[i] in ("--binance", "-b"):
             exchange = "binance"
             i += 1
-        elif args[i] == "--okx":
+        elif args[i] in ("--okx", "-o"):
             exchange = "okx"
             i += 1
-        elif args[i] == "--exchange" and i + 1 < len(args):
+        elif args[i] in ("--exchange", "-e") and i + 1 < len(args):
             value = args[i + 1].lower()
             if value not in ("okx", "binance"):
                 raise SystemExit("--exchange 只支持 okx 或 binance")
@@ -112,10 +129,10 @@ def main():
         print(__doc__)
         sys.exit(0)
     args = sys.argv[1:]
-    with_check = "--check" in args
-    args = [a for a in args if a != "--check"]
-    account, args = _extract_flag_value(args, "--account", 2000)
-    risk_pct, args = _extract_flag_value(args, "--risk", 2)
+    with_check, args = _extract_bool(args, ("--check", "-c"))
+    force_reversion, args = _extract_bool(args, ("--force-reversion", "--fr"))
+    account, args = _extract_flag_value(args, ("--account", "-a"), 2000)
+    risk_pct, args = _extract_flag_value(args, ("--risk", "-r"), 2)
     level, args = _extract_level(args)
     exchange, args = _extract_exchange(args)
 
@@ -127,7 +144,7 @@ def main():
     print(f"  交易级别: {level} {lv['name']} (持仓 {lv['hold']}, 关键位周期 {'+'.join(lv['tfs'])})")
     try:
         run(inst_id, exchange=exchange, with_check=with_check, account=account,
-            risk_pct=risk_pct, level=level)
+            risk_pct=risk_pct, level=level, force_reversion=force_reversion)
     except (KeyboardInterrupt, EOFError):
         print("\n\n  → 已中断,未保存任何状态")
         sys.exit(0)
